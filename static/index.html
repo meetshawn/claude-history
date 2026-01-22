@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude History Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: #1f2937; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        .message-content { white-space: pre-wrap; word-break: break-word; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .card-hover { transition: all 0.3s ease; }
+        .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <!-- 导航栏 -->
+    <nav class="gradient-bg shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+                    </svg>
+                    <h1 class="text-2xl font-bold text-white">Claude History Viewer</h1>
+                </div>
+                <div class="flex space-x-4">
+                    <button onclick="showTab('projects')" id="tab-projects" class="tab-btn px-4 py-2 rounded-lg bg-white/20 text-white hover:bg-white/30 transition">
+                        项目列表
+                    </button>
+                    <button onclick="showTab('statistics')" id="tab-statistics" class="tab-btn px-4 py-2 rounded-lg text-white/80 hover:bg-white/20 transition">
+                        数据分析
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容区 -->
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <!-- 项目列表视图 -->
+        <div id="view-projects" class="fade-in">
+            <div class="grid grid-cols-12 gap-6">
+                <!-- 左侧：项目列表 -->
+                <div class="col-span-3">
+                    <div class="bg-gray-800 rounded-xl shadow-xl overflow-hidden">
+                        <div class="p-4 border-b border-gray-700">
+                            <h2 class="text-lg font-semibold flex items-center">
+                                <svg class="w-5 h-5 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                                </svg>
+                                项目
+                            </h2>
+                        </div>
+                        <div id="project-list" class="max-h-[calc(100vh-250px)] overflow-y-auto scrollbar-thin">
+                            <div class="p-4 text-center text-gray-500">加载中...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 中间：会话列表 -->
+                <div class="col-span-3">
+                    <div class="bg-gray-800 rounded-xl shadow-xl overflow-hidden">
+                        <div class="p-4 border-b border-gray-700">
+                            <h2 class="text-lg font-semibold flex items-center">
+                                <svg class="w-5 h-5 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path>
+                                </svg>
+                                会话
+                            </h2>
+                        </div>
+                        <div id="session-list" class="max-h-[calc(100vh-250px)] overflow-y-auto scrollbar-thin">
+                            <div class="p-4 text-center text-gray-500">请选择一个项目</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右侧：消息详情 -->
+                <div class="col-span-6">
+                    <div class="bg-gray-800 rounded-xl shadow-xl overflow-hidden">
+                        <div class="p-4 border-b border-gray-700">
+                            <div class="flex items-center justify-between">
+                                <h2 class="text-lg font-semibold flex items-center">
+                                    <svg class="w-5 h-5 mr-2 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                                    </svg>
+                                    对话内容
+                                </h2>
+                                <div id="source-file-info" class="hidden">
+                                    <button onclick="openSourceFile()" class="flex items-center text-xs text-blue-400 hover:text-blue-300 transition">
+                                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                        </svg>
+                                        <span id="source-file-path" class="truncate max-w-xs" title=""></span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="message-list" class="max-h-[calc(100vh-250px)] overflow-y-auto scrollbar-thin p-4">
+                            <div class="text-center text-gray-500">请选择一个会话查看对话内容</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 统计分析视图 -->
+        <div id="view-statistics" class="hidden fade-in">
+            <!-- 概览卡片 -->
+            <div class="grid grid-cols-4 gap-6 mb-6">
+                <div class="bg-gradient-to-br from-purple-600 to-purple-800 rounded-xl p-6 card-hover">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-purple-200 text-sm">总项目数</p>
+                            <p id="stat-projects" class="text-3xl font-bold mt-1">-</p>
+                        </div>
+                        <svg class="w-12 h-12 text-purple-300/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div class="bg-gradient-to-br from-blue-600 to-blue-800 rounded-xl p-6 card-hover">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-blue-200 text-sm">总会话数</p>
+                            <p id="stat-sessions" class="text-3xl font-bold mt-1">-</p>
+                        </div>
+                        <svg class="w-12 h-12 text-blue-300/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div class="bg-gradient-to-br from-green-600 to-green-800 rounded-xl p-6 card-hover">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-green-200 text-sm">总消息数</p>
+                            <p id="stat-messages" class="text-3xl font-bold mt-1">-</p>
+                        </div>
+                        <svg class="w-12 h-12 text-green-300/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div class="bg-gradient-to-br from-orange-600 to-orange-800 rounded-xl p-6 card-hover">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-orange-200 text-sm">历史记录</p>
+                            <p id="stat-history" class="text-3xl font-bold mt-1">-</p>
+                        </div>
+                        <svg class="w-12 h-12 text-orange-300/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 图表区域 -->
+            <div class="grid grid-cols-2 gap-6 mb-6">
+                <div class="bg-gray-800 rounded-xl p-6 card-hover">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                        每日活动趋势
+                    </h3>
+                    <canvas id="chart-daily"></canvas>
+                </div>
+                <div class="bg-gray-800 rounded-xl p-6 card-hover">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        每小时活动分布
+                    </h3>
+                    <canvas id="chart-hourly"></canvas>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6">
+                <div class="bg-gray-800 rounded-xl p-6 card-hover">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                        </svg>
+                        工具使用统计
+                    </h3>
+                    <canvas id="chart-tools"></canvas>
+                </div>
+                <div class="bg-gray-800 rounded-xl p-6 card-hover">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                        </svg>
+                        项目活跃度 Top 10
+                    </h3>
+                    <canvas id="chart-projects"></canvas>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 全局状态
+        let currentProjectId = null;
+        let currentSessionId = null;
+        let currentSourceFile = null;
+        let charts = {};
+
+        // 格式化时间戳
+        function formatTimestamp(ts) {
+            if (!ts) return '-';
+            const date = new Date(ts);
+            return date.toLocaleString('zh-CN');
+        }
+
+        // 截断文本
+        function truncate(text, maxLength = 50) {
+            if (!text) return '';
+            if (text.length <= maxLength) return text;
+            return text.substring(0, maxLength) + '...';
+        }
+
+        // 转义HTML
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 打开源文件
+        function openSourceFile() {
+            if (currentSourceFile) {
+                // 复制路径到剪贴板
+                navigator.clipboard.writeText(currentSourceFile).then(() => {
+                    alert('源文件路径已复制到剪贴板:\n' + currentSourceFile);
+                }).catch(() => {
+                    prompt('源文件路径:', currentSourceFile);
+                });
+            }
+        }
+
+        // 切换标签页
+        function showTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('bg-white/20');
+                btn.classList.add('text-white/80');
+            });
+            document.getElementById(`tab-${tab}`).classList.add('bg-white/20');
+            document.getElementById(`tab-${tab}`).classList.remove('text-white/80');
+
+            document.getElementById('view-projects').classList.add('hidden');
+            document.getElementById('view-statistics').classList.add('hidden');
+            document.getElementById(`view-${tab}`).classList.remove('hidden');
+
+            if (tab === 'statistics') {
+                loadStatistics();
+            }
+        }
+
+        // 加载项目列表
+        async function loadProjects() {
+            try {
+                const response = await fetch('/api/projects');
+                const projects = await response.json();
+
+                const container = document.getElementById('project-list');
+                if (projects.length === 0) {
+                    container.innerHTML = '<div class="p-4 text-center text-gray-500">暂无项目</div>';
+                    return;
+                }
+
+                container.innerHTML = projects.map(project => `
+                    <div class="p-3 border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer transition"
+                         onclick="loadSessions('${project.id}')">
+                        <div class="font-medium text-sm truncate" title="${escapeHtml(project.name)}">
+                            ${escapeHtml(truncate(project.name, 30))}
+                        </div>
+                        <div class="text-xs text-gray-400 mt-1">
+                            ${project.session_count} 个会话
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('加载项目失败:', error);
+                document.getElementById('project-list').innerHTML =
+                    '<div class="p-4 text-center text-red-400">加载失败</div>';
+            }
+        }
+
+        // 加载会话列表
+        async function loadSessions(projectId) {
+            currentProjectId = projectId;
+            currentSessionId = null;
+
+            document.getElementById('message-list').innerHTML =
+                '<div class="text-center text-gray-500">请选择一个会话查看对话内容</div>';
+
+            try {
+                const response = await fetch(`/api/projects/${projectId}/sessions`);
+                const sessions = await response.json();
+
+                const container = document.getElementById('session-list');
+                if (sessions.length === 0) {
+                    container.innerHTML = '<div class="p-4 text-center text-gray-500">暂无会话</div>';
+                    return;
+                }
+
+                container.innerHTML = sessions.map(session => `
+                    <div class="p-3 border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer transition"
+                         onclick="loadMessages('${projectId}', '${session.id}')">
+                        <div class="font-medium text-sm truncate text-blue-400">
+                            ${session.id.substring(0, 8)}...
+                        </div>
+                        <div class="text-xs text-gray-400 mt-1">
+                            ${session.message_count} 条消息
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1">
+                            ${formatTimestamp(session.last_timestamp)}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('加载会话失败:', error);
+                document.getElementById('session-list').innerHTML =
+                    '<div class="p-4 text-center text-red-400">加载失败</div>';
+            }
+        }
+
+        // 加载消息列表
+        async function loadMessages(projectId, sessionId) {
+            currentSessionId = sessionId;
+
+            try {
+                const response = await fetch(`/api/projects/${projectId}/sessions/${sessionId}`);
+                const data = await response.json();
+                const messages = data.messages || [];
+
+                // 更新源文件信息
+                currentSourceFile = data.source_file;
+                const sourceFileInfo = document.getElementById('source-file-info');
+                const sourceFilePath = document.getElementById('source-file-path');
+                if (currentSourceFile) {
+                    sourceFileInfo.classList.remove('hidden');
+                    sourceFilePath.textContent = truncate(currentSourceFile, 40);
+                    sourceFilePath.title = currentSourceFile;
+                } else {
+                    sourceFileInfo.classList.add('hidden');
+                }
+
+                const container = document.getElementById('message-list');
+                if (messages.length === 0) {
+                    container.innerHTML = '<div class="text-center text-gray-500">暂无消息</div>';
+                    return;
+                }
+
+                container.innerHTML = messages.map(msg => `
+                    <div class="mb-4 fade-in ${msg.type === 'user' ? 'ml-8' : 'mr-8'}">
+                        <div class="flex items-center mb-1 flex-wrap gap-1">
+                            <span class="text-xs font-medium ${msg.type === 'user' ? 'text-blue-400' : 'text-green-400'}">
+                                ${msg.type === 'user' ? '用户' : 'Claude'}
+                            </span>
+                            ${msg.model ? `<span class="text-xs text-purple-400 bg-purple-900/30 px-1.5 py-0.5 rounded">${escapeHtml(msg.model)}</span>` : ''}
+                            <span class="text-xs text-gray-500 ml-2">
+                                ${formatTimestamp(msg.timestamp)}
+                            </span>
+                            ${msg.cwd ? `<span class="text-xs text-gray-600 ml-2" title="${escapeHtml(msg.cwd)}">📁 ${escapeHtml(truncate(msg.cwd, 30))}</span>` : ''}
+                        </div>
+                        <div class="p-3 rounded-lg ${msg.type === 'user' ? 'bg-blue-900/30 border border-blue-800' : 'bg-gray-700/50 border border-gray-600'}">
+                            <div class="message-content text-sm">${escapeHtml(msg.content)}</div>
+                        </div>
+                    </div>
+                `).join('');
+
+                container.scrollTop = 0;
+            } catch (error) {
+                console.error('加载消息失败:', error);
+                document.getElementById('message-list').innerHTML =
+                    '<div class="text-center text-red-400">加载失败</div>';
+            }
+        }
+
+        // 加载统计数据
+        async function loadStatistics() {
+            try {
+                const response = await fetch('/api/statistics');
+                const stats = await response.json();
+
+                // 更新概览数字
+                document.getElementById('stat-projects').textContent = stats.total_projects;
+                document.getElementById('stat-sessions').textContent = stats.total_sessions;
+                document.getElementById('stat-messages').textContent = stats.total_messages;
+                document.getElementById('stat-history').textContent = stats.total_history_entries;
+
+                // 绘制图表
+                renderDailyChart(stats.daily_activity);
+                renderHourlyChart(stats.hourly_activity);
+                renderToolsChart(stats.tool_usage);
+                renderProjectsChart(stats.projects_by_activity);
+            } catch (error) {
+                console.error('加载统计数据失败:', error);
+            }
+        }
+
+        // 绘制每日活动图表
+        function renderDailyChart(data) {
+            const ctx = document.getElementById('chart-daily').getContext('2d');
+            if (charts.daily) charts.daily.destroy();
+
+            charts.daily = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: Object.keys(data),
+                    datasets: [{
+                        label: '活动次数',
+                        data: Object.values(data),
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#374151' }, ticks: { color: '#9ca3af' } },
+                        y: { grid: { color: '#374151' }, ticks: { color: '#9ca3af' } }
+                    }
+                }
+            });
+        }
+
+        // 绘制每小时活动图表
+        function renderHourlyChart(data) {
+            const ctx = document.getElementById('chart-hourly').getContext('2d');
+            if (charts.hourly) charts.hourly.destroy();
+
+            const labels = Array.from({length: 24}, (_, i) => `${i}:00`);
+            const values = labels.map((_, i) => data[i] || 0);
+
+            charts.hourly = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '活动次数',
+                        data: values,
+                        backgroundColor: '#8b5cf6'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#374151' }, ticks: { color: '#9ca3af' } },
+                        y: { grid: { color: '#374151' }, ticks: { color: '#9ca3af' } }
+                    }
+                }
+            });
+        }
+
+        // 绘制工具使用图表
+        function renderToolsChart(data) {
+            const ctx = document.getElementById('chart-tools').getContext('2d');
+            if (charts.tools) charts.tools.destroy();
+
+            const entries = Object.entries(data).slice(0, 10);
+            charts.tools = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: entries.map(e => e[0]),
+                    datasets: [{
+                        data: entries.map(e => e[1]),
+                        backgroundColor: [
+                            '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6',
+                            '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { color: '#9ca3af' }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 绘制项目活跃度图表
+        function renderProjectsChart(data) {
+            const ctx = document.getElementById('chart-projects').getContext('2d');
+            if (charts.projects) charts.projects.destroy();
+
+            charts.projects = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.map(p => truncate(p.name, 20)),
+                    datasets: [{
+                        label: '消息数',
+                        data: data.map(p => p.messages),
+                        backgroundColor: '#f97316'
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#374151' }, ticks: { color: '#9ca3af' } },
+                        y: { grid: { color: '#374151' }, ticks: { color: '#9ca3af' } }
+                    }
+                }
+            });
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadProjects();
+        });
+    </script>
+</body>
+</html>
