@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 from typing import Optional
+import shutil
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
@@ -306,6 +307,59 @@ async def api_history(limit: int = 100, offset: int = 0):
         "total": len(history),
         "items": history[offset:offset + limit]
     }
+
+
+@app.delete("/api/projects/{project_id}/sessions/{session_id}")
+async def api_delete_session(project_id: str, session_id: str):
+    """删除会话"""
+    session_file = PROJECTS_DIR / project_id / f"{session_id}.jsonl"
+    session_dir = PROJECTS_DIR / project_id / session_id
+
+    deleted_files = []
+    errors = []
+
+    # 删除会话文件
+    if session_file.exists():
+        try:
+            session_file.unlink()
+            deleted_files.append(str(session_file))
+        except Exception as e:
+            errors.append(f"删除文件失败: {str(e)}")
+
+    # 删除会话目录（如果存在）
+    if session_dir.exists() and session_dir.is_dir():
+        try:
+            shutil.rmtree(session_dir)
+            deleted_files.append(str(session_dir))
+        except Exception as e:
+            errors.append(f"删除目录失败: {str(e)}")
+
+    if not deleted_files and not errors:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    return {
+        "success": len(errors) == 0,
+        "deleted": deleted_files,
+        "errors": errors
+    }
+
+
+@app.delete("/api/projects/{project_id}")
+async def api_delete_project(project_id: str):
+    """删除整个项目"""
+    project_dir = PROJECTS_DIR / project_id
+
+    if not project_dir.exists():
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    try:
+        shutil.rmtree(project_dir)
+        return {
+            "success": True,
+            "deleted": str(project_dir)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
 # 挂载静态文件

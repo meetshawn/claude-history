@@ -246,6 +246,73 @@
             }
         }
 
+        // 删除会话
+        async function deleteSession(projectId, sessionId) {
+            if (!confirm(`确定要删除会话 ${sessionId.substring(0, 8)}... 吗？\n\n此操作不可恢复！`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/projects/${projectId}/sessions/${sessionId}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    // 刷新会话列表
+                    loadSessions(projectId);
+                    // 如果删除的是当前显示的会话，清空消息区域
+                    if (currentSessionId === sessionId) {
+                        currentSessionId = null;
+                        document.getElementById('message-list').innerHTML =
+                            '<div class="text-center text-gray-500">请选择一个会话查看对话内容</div>';
+                        document.getElementById('source-file-info').classList.add('hidden');
+                    }
+                    // 刷新项目列表以更新会话计数
+                    loadProjects();
+                } else {
+                    alert('删除失败: ' + (result.errors?.join(', ') || '未知错误'));
+                }
+            } catch (error) {
+                console.error('删除会话失败:', error);
+                alert('删除失败: ' + error.message);
+            }
+        }
+
+        // 删除项目
+        async function deleteProject(projectId, projectName) {
+            if (!confirm(`确定要删除项目 "${projectName}" 及其所有会话吗？\n\n此操作不可恢复！`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/projects/${projectId}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    // 刷新项目列表
+                    loadProjects();
+                    // 清空会话和消息区域
+                    if (currentProjectId === projectId) {
+                        currentProjectId = null;
+                        currentSessionId = null;
+                        document.getElementById('session-list').innerHTML =
+                            '<div class="p-4 text-center text-gray-500">请选择一个项目</div>';
+                        document.getElementById('message-list').innerHTML =
+                            '<div class="text-center text-gray-500">请选择一个会话查看对话内容</div>';
+                        document.getElementById('source-file-info').classList.add('hidden');
+                    }
+                } else {
+                    alert('删除失败: ' + (result.detail || '未知错误'));
+                }
+            } catch (error) {
+                console.error('删除项目失败:', error);
+                alert('删除失败: ' + error.message);
+            }
+        }
+
         // 切换标签页
         function showTab(tab) {
             document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -277,10 +344,19 @@
                 }
 
                 container.innerHTML = projects.map(project => `
-                    <div class="p-3 border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer transition"
+                    <div class="p-3 border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer transition group"
                          onclick="loadSessions('${project.id}')">
-                        <div class="font-medium text-sm truncate" title="${escapeHtml(project.name)}">
-                            ${escapeHtml(truncate(project.name, 30))}
+                        <div class="flex items-center justify-between">
+                            <div class="font-medium text-sm truncate" title="${escapeHtml(project.name)}">
+                                ${escapeHtml(truncate(project.name, 25))}
+                            </div>
+                            <button onclick="event.stopPropagation(); deleteProject('${project.id}', '${escapeHtml(project.name).replace(/'/g, "\\'")}')"
+                                    class="opacity-0 group-hover:opacity-100 p-1 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition"
+                                    title="删除此项目">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>
                         </div>
                         <div class="text-xs text-gray-400 mt-1">
                             ${project.session_count} 个会话
@@ -313,10 +389,19 @@
                 }
 
                 container.innerHTML = sessions.map(session => `
-                    <div class="p-3 border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer transition"
+                    <div class="p-3 border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer transition group"
                          onclick="loadMessages('${projectId}', '${session.id}')">
-                        <div class="font-medium text-sm truncate text-blue-400">
-                            ${session.id.substring(0, 8)}...
+                        <div class="flex items-center justify-between">
+                            <div class="font-medium text-sm truncate text-blue-400">
+                                ${session.id.substring(0, 8)}...
+                            </div>
+                            <button onclick="event.stopPropagation(); deleteSession('${projectId}', '${session.id}')"
+                                    class="opacity-0 group-hover:opacity-100 p-1 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition"
+                                    title="删除此会话">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>
                         </div>
                         <div class="text-xs text-gray-400 mt-1">
                             ${session.message_count} 条消息
