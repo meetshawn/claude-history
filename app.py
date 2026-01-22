@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
+from openai import OpenAI
 
 app = FastAPI(title="Claude History Viewer", version="1.0.0")
 
@@ -20,6 +21,45 @@ app = FastAPI(title="Claude History Viewer", version="1.0.0")
 CLAUDE_DIR = Path.home() / ".claude"
 HISTORY_FILE = CLAUDE_DIR / "history.jsonl"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
+
+# 应用配置目录
+APP_DIR = Path(__file__).parent
+CONFIG_FILE = APP_DIR / "config.json"
+REPORTS_DIR = APP_DIR / "reports"
+
+
+def load_config():
+    """加载配置文件"""
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {
+        "openai": {
+            "api_key": "",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini"
+        }
+    }
+
+
+def save_config(config):
+    """保存配置文件"""
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+
+
+def get_openai_client():
+    """获取OpenAI客户端"""
+    config = load_config()
+    openai_config = config.get("openai", {})
+
+    if not openai_config.get("api_key"):
+        return None
+
+    return OpenAI(
+        api_key=openai_config["api_key"],
+        base_url=openai_config.get("base_url", "https://api.openai.com/v1")
+    )
 
 
 def get_claude_dir():
@@ -360,6 +400,268 @@ async def api_delete_project(project_id: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+# ============ AI分析相关API ============
+
+class ConfigUpdate(BaseModel):
+    api_key: str
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-4o-mini"
+
+
+@app.get("/api/config")
+async def api_get_config():
+    """获取配置（隐藏API密钥）"""
+    config = load_config()
+    openai_config = config.get("openai", {})
+    return {
+        "api_key": "***" + openai_config.get("api_key", "")[-4:] if openai_config.get("api_key") else "",
+        "base_url": openai_config.get("base_url", "https://api.openai.com/v1"),
+        "model": openai_config.get("model", "gpt-4o-mini"),
+        "configured": bool(openai_config.get("api_key"))
+    }
+
+
+@app.post("/api/config")
+async def api_update_config(config_update: ConfigUpdate):
+    """更新配置"""
+    config = load_config()
+    config["openai"] = {
+        "api_key": config_update.api_key,
+        "base_url": config_update.base_url,
+        "model": config_update.model
+    }
+    save_config(config)
+    return {"success": True}
+
+
+ANALYSIS_PROMPT = """你是一个专业的用户行为分析师，专门分析开发者与AI助手的对话记录，从中提取用户的技术偏好、编程习惯、决策模式和工作风格。
+
+请分析以下对话记录，提取用户的技术偏好，并生成个性化的AI Rules。
+
+## 分析维度
+
+1. **技术栈偏好**: 编程语言、框架、数据库、工具链
+2. **编码风格偏好**: 命名规范、注释习惯、代码简洁度
+3. **工作流程偏好**: 开发方式、迭代风格、沟通方式
+4. **明确排斥**: 用户不喜欢或拒绝的做法
+
+## 输出格式
+
+请按以下Markdown格式输出分析报告：
+
+```markdown
+# 用户技术偏好分析报告
+
+## 分析概要
+[简要总结用户的主要技术偏好特征]
+
+## 核心偏好 (高置信度)
+- **[偏好类别]**: [具体偏好] - [证据/出现次数]
+
+## 一般偏好 (中置信度)
+- **[偏好类别]**: [具体偏好] - [证据]
+
+## 明确排斥
+- [用户不喜欢的做法] - [证据]
+
+---
+
+# 推荐的 AI Rules
+
+以下规则可添加到 `~/.claude/CLAUDE.md` 或项目的 `CLAUDE.md` 文件中：
+
+## 语言与交互
+- [交互偏好规则]
+
+## 技术栈
+- [技术选型规则]
+
+## 编码规范
+- [编码风格规则]
+
+## 工作方式
+- [工作流程规则]
+
+## 禁止事项
+- [不要做的事情]
+```
+
+## 对话记录
+
+"""
+
+
+@app.post("/api/analyze/{project_id}/sessions/{session_id}")
+async def api_analyze_session(project_id: str, session_id: str):
+    """分析单个会话"""
+    client = get_openai_client()
+    if not client:
+        raise HTTPException(status_code=400, detail="请先配置OpenAI API密钥")
+
+    messages = get_session_messages(project_id, session_id)
+    if not messages:
+        raise HTTPException(status_code=404, detail="会话不存在或没有消息")
+
+    # 构建对话内容
+    conversation = []
+    for msg in messages[:100]:  # 限制消息数量避免超长
+        role = "用户" if msg["type"] == "user" else "AI助手"
+        content = msg["content"][:1000]  # 截断过长内容
+        conversation.append(f"**{role}**: {content}")
+
+    conversation_text = "\n\n".join(conversation)
+
+    # 调用AI分析
+    config = load_config()
+    model = config.get("openai", {}).get("model", "gpt-4o-mini")
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个专业的用户行为分析师，擅长从对话中提取用户偏好。请用中文回复。"},
+                {"role": "user", "content": ANALYSIS_PROMPT + conversation_text}
+            ],
+            max_tokens=4000
+        )
+
+        analysis_result = response.choices[0].message.content
+
+        # 保存报告
+        REPORTS_DIR.mkdir(exist_ok=True)
+        report_filename = f"{project_id}_{session_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        report_path = REPORTS_DIR / report_filename
+
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(f"# 会话分析报告\n\n")
+            f.write(f"- **项目**: {project_id}\n")
+            f.write(f"- **会话**: {session_id}\n")
+            f.write(f"- **分析时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"- **消息数量**: {len(messages)}\n\n")
+            f.write("---\n\n")
+            f.write(analysis_result)
+
+        return {
+            "success": True,
+            "report": analysis_result,
+            "report_file": report_filename
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
+
+
+@app.post("/api/analyze/{project_id}")
+async def api_analyze_project(project_id: str):
+    """分析整个项目的所有会话"""
+    client = get_openai_client()
+    if not client:
+        raise HTTPException(status_code=400, detail="请先配置OpenAI API密钥")
+
+    sessions = get_project_sessions(project_id)
+    if not sessions:
+        raise HTTPException(status_code=404, detail="项目不存在或没有会话")
+
+    # 收集所有会话的消息
+    all_messages = []
+    for session in sessions[:10]:  # 限制会话数量
+        messages = get_session_messages(project_id, session["id"])
+        all_messages.extend(messages[:20])  # 每个会话取前20条
+
+    if not all_messages:
+        raise HTTPException(status_code=404, detail="没有找到消息")
+
+    # 构建对话内容
+    conversation = []
+    for msg in all_messages[:200]:  # 总共限制200条
+        role = "用户" if msg["type"] == "user" else "AI助手"
+        content = msg["content"][:500]
+        conversation.append(f"**{role}**: {content}")
+
+    conversation_text = "\n\n".join(conversation)
+
+    # 调用AI分析
+    config = load_config()
+    model = config.get("openai", {}).get("model", "gpt-4o-mini")
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个专业的用户行为分析师，擅长从对话中提取用户偏好。请用中文回复。"},
+                {"role": "user", "content": ANALYSIS_PROMPT + conversation_text}
+            ],
+            max_tokens=4000
+        )
+
+        analysis_result = response.choices[0].message.content
+
+        # 保存报告
+        REPORTS_DIR.mkdir(exist_ok=True)
+        report_filename = f"{project_id}_full_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        report_path = REPORTS_DIR / report_filename
+
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(f"# 项目分析报告\n\n")
+            f.write(f"- **项目**: {project_id}\n")
+            f.write(f"- **分析时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"- **会话数量**: {len(sessions)}\n")
+            f.write(f"- **分析消息数**: {len(all_messages)}\n\n")
+            f.write("---\n\n")
+            f.write(analysis_result)
+
+        return {
+            "success": True,
+            "report": analysis_result,
+            "report_file": report_filename
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
+
+
+@app.get("/api/reports")
+async def api_list_reports():
+    """获取所有分析报告列表"""
+    REPORTS_DIR.mkdir(exist_ok=True)
+    reports = []
+    for report_file in REPORTS_DIR.glob("*.md"):
+        stat = report_file.stat()
+        reports.append({
+            "filename": report_file.name,
+            "size": stat.st_size,
+            "created": datetime.fromtimestamp(stat.st_mtime).isoformat()
+        })
+    return sorted(reports, key=lambda x: x["created"], reverse=True)
+
+
+@app.get("/api/reports/{filename}")
+async def api_get_report(filename: str):
+    """获取分析报告内容"""
+    report_path = REPORTS_DIR / filename
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="报告不存在")
+
+    with open(report_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    return {
+        "filename": filename,
+        "content": content
+    }
+
+
+@app.delete("/api/reports/{filename}")
+async def api_delete_report(filename: str):
+    """删除分析报告"""
+    report_path = REPORTS_DIR / filename
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="报告不存在")
+
+    report_path.unlink()
+    return {"success": True}
 
 
 # 挂载静态文件

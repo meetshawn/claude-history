@@ -6,6 +6,7 @@
     <title>Claude History Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         .scrollbar-thin::-webkit-scrollbar { width: 6px; }
         .scrollbar-thin::-webkit-scrollbar-track { background: #1f2937; }
@@ -17,6 +18,20 @@
         .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
         .card-hover { transition: all 0.3s ease; }
         .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; }
+        .modal.active { display: flex; align-items: center; justify-content: center; }
+        .markdown-body { color: #e5e7eb; line-height: 1.6; }
+        .markdown-body h1 { font-size: 1.5rem; font-weight: bold; margin: 1rem 0; color: #fff; border-bottom: 1px solid #374151; padding-bottom: 0.5rem; }
+        .markdown-body h2 { font-size: 1.25rem; font-weight: bold; margin: 1rem 0; color: #a78bfa; }
+        .markdown-body h3 { font-size: 1.1rem; font-weight: bold; margin: 0.75rem 0; color: #60a5fa; }
+        .markdown-body p { margin: 0.5rem 0; }
+        .markdown-body ul, .markdown-body ol { margin: 0.5rem 0; padding-left: 1.5rem; }
+        .markdown-body li { margin: 0.25rem 0; }
+        .markdown-body code { background: #1f2937; padding: 0.125rem 0.25rem; border-radius: 0.25rem; font-size: 0.875rem; }
+        .markdown-body pre { background: #1f2937; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0; }
+        .markdown-body pre code { background: none; padding: 0; }
+        .markdown-body hr { border-color: #374151; margin: 1rem 0; }
+        .markdown-body strong { color: #fbbf24; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
@@ -36,6 +51,15 @@
                     </button>
                     <button onclick="showTab('statistics')" id="tab-statistics" class="tab-btn px-4 py-2 rounded-lg text-white/80 hover:bg-white/20 transition">
                         数据分析
+                    </button>
+                    <button onclick="showTab('reports')" id="tab-reports" class="tab-btn px-4 py-2 rounded-lg text-white/80 hover:bg-white/20 transition">
+                        分析报告
+                    </button>
+                    <button onclick="showConfigModal()" class="px-4 py-2 rounded-lg text-white/80 hover:bg-white/20 transition" title="API配置">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
                     </button>
                 </div>
             </div>
@@ -100,6 +124,12 @@
                                         <span id="source-file-path" class="truncate max-w-xs" title=""></span>
                                     </button>
                                 </div>
+                                <button id="analyze-session-btn" onclick="analyzeCurrentSession()" class="hidden ml-2 px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs rounded-lg transition flex items-center">
+                                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                                    </svg>
+                                    AI分析
+                                </button>
                             </div>
                         </div>
                         <div id="message-list" class="max-h-[calc(100vh-250px)] overflow-y-auto scrollbar-thin p-4">
@@ -203,7 +233,70 @@
                 </div>
             </div>
         </div>
+
+        <!-- 分析报告视图 -->
+        <div id="view-reports" class="hidden fade-in">
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold flex items-center">
+                    <svg class="w-6 h-6 mr-2 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    AI分析报告
+                </h2>
+                <p class="text-gray-400 text-sm mt-1">查看所有AI生成的用户偏好分析报告</p>
+            </div>
+            <div id="reports-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="text-center text-gray-500 py-8">加载中...</div>
+            </div>
+        </div>
     </main>
+
+    <!-- 配置弹窗 -->
+    <div id="config-modal" class="modal">
+        <div class="bg-gray-800 rounded-xl p-6 w-full max-w-md mx-4">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold">API配置</h3>
+                <button onclick="closeConfigModal()" class="text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">API Base URL</label>
+                    <input type="text" id="config-base-url" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white" placeholder="https://api.openai.com/v1">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">API Key</label>
+                    <input type="password" id="config-api-key" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white" placeholder="sk-...">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">模型</label>
+                    <input type="text" id="config-model" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white" placeholder="gpt-4o-mini">
+                </div>
+                <button onclick="saveConfig()" class="w-full bg-purple-600 hover:bg-purple-500 text-white py-2 rounded-lg transition">
+                    保存配置
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 报告弹窗 -->
+    <div id="report-modal" class="modal">
+        <div class="bg-gray-800 rounded-xl w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between p-4 border-b border-gray-700">
+                <h3 id="report-filename" class="text-lg font-semibold">分析报告</h3>
+                <button onclick="closeReportModal()" class="text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div id="report-content" class="p-6 overflow-y-auto markdown-body">
+            </div>
+        </div>
+    </div>
 
     <script>
         // 全局状态
@@ -324,10 +417,13 @@
 
             document.getElementById('view-projects').classList.add('hidden');
             document.getElementById('view-statistics').classList.add('hidden');
+            document.getElementById('view-reports').classList.add('hidden');
             document.getElementById(`view-${tab}`).classList.remove('hidden');
 
             if (tab === 'statistics') {
                 loadStatistics();
+            } else if (tab === 'reports') {
+                loadReports();
             }
         }
 
@@ -462,6 +558,9 @@
                         </div>
                     </div>
                 `).join('');
+
+                // 显示AI分析按钮
+                document.getElementById('analyze-session-btn').classList.remove('hidden');
 
                 container.scrollTop = 0;
             } catch (error) {
@@ -611,7 +710,191 @@
         // 初始化
         document.addEventListener('DOMContentLoaded', () => {
             loadProjects();
+            checkConfig();
         });
+
+        // 检查API配置
+        async function checkConfig() {
+            try {
+                const response = await fetch('/api/config');
+                const config = await response.json();
+                if (!config.configured) {
+                    console.log('API未配置，AI分析功能不可用');
+                }
+            } catch (error) {
+                console.error('检查配置失败:', error);
+            }
+        }
+
+        // 显示配置弹窗
+        async function showConfigModal() {
+            const modal = document.getElementById('config-modal');
+            modal.classList.add('active');
+
+            try {
+                const response = await fetch('/api/config');
+                const config = await response.json();
+                document.getElementById('config-base-url').value = config.base_url || 'https://api.openai.com/v1';
+                document.getElementById('config-model').value = config.model || 'gpt-4o-mini';
+                document.getElementById('config-api-key').value = '';
+                document.getElementById('config-api-key').placeholder = config.configured ? '已配置 (留空保持不变)' : '请输入API密钥';
+            } catch (error) {
+                console.error('加载配置失败:', error);
+            }
+        }
+
+        // 关闭配置弹窗
+        function closeConfigModal() {
+            document.getElementById('config-modal').classList.remove('active');
+        }
+
+        // 保存配置
+        async function saveConfig() {
+            const apiKey = document.getElementById('config-api-key').value;
+            const baseUrl = document.getElementById('config-base-url').value;
+            const model = document.getElementById('config-model').value;
+
+            if (!apiKey) {
+                alert('请输入API密钥');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_key: apiKey, base_url: baseUrl, model: model })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert('配置保存成功');
+                    closeConfigModal();
+                } else {
+                    alert('保存失败');
+                }
+            } catch (error) {
+                console.error('保存配置失败:', error);
+                alert('保存失败: ' + error.message);
+            }
+        }
+
+        // 分析当前会话
+        async function analyzeCurrentSession() {
+            if (!currentProjectId || !currentSessionId) {
+                alert('请先选择一个会话');
+                return;
+            }
+
+            const btn = document.getElementById('analyze-session-btn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<svg class="w-4 h-4 mr-1 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>分析中...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(`/api/analyze/${currentProjectId}/sessions/${currentSessionId}`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    showReportModal(result.report, result.report_file);
+                } else {
+                    alert('分析失败: ' + (result.detail || '未知错误'));
+                }
+            } catch (error) {
+                console.error('分析失败:', error);
+                alert('分析失败: ' + error.message);
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        // 显示报告弹窗
+        function showReportModal(content, filename) {
+            const modal = document.getElementById('report-modal');
+            const reportContent = document.getElementById('report-content');
+            const reportFilename = document.getElementById('report-filename');
+
+            reportFilename.textContent = filename || '分析报告';
+            reportContent.innerHTML = marked.parse(content);
+            modal.classList.add('active');
+        }
+
+        // 关闭报告弹窗
+        function closeReportModal() {
+            document.getElementById('report-modal').classList.remove('active');
+        }
+
+        // 加载报告列表
+        async function loadReports() {
+            try {
+                const response = await fetch('/api/reports');
+                const reports = await response.json();
+
+                const container = document.getElementById('reports-list');
+                if (reports.length === 0) {
+                    container.innerHTML = '<div class="text-center text-gray-500 py-8">暂无分析报告</div>';
+                    return;
+                }
+
+                container.innerHTML = reports.map(report => `
+                    <div class="bg-gray-800 rounded-lg p-4 card-hover cursor-pointer" onclick="viewReport('${report.filename}')">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <svg class="w-8 h-8 text-purple-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                </svg>
+                                <div>
+                                    <div class="font-medium">${report.filename}</div>
+                                    <div class="text-xs text-gray-400">${new Date(report.created).toLocaleString('zh-CN')}</div>
+                                </div>
+                            </div>
+                            <button onclick="event.stopPropagation(); deleteReport('${report.filename}')" class="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('加载报告列表失败:', error);
+                document.getElementById('reports-list').innerHTML = '<div class="text-center text-red-400">加载失败</div>';
+            }
+        }
+
+        // 查看报告
+        async function viewReport(filename) {
+            try {
+                const response = await fetch(`/api/reports/${filename}`);
+                const result = await response.json();
+                showReportModal(result.content, result.filename);
+            } catch (error) {
+                console.error('加载报告失败:', error);
+                alert('加载报告失败: ' + error.message);
+            }
+        }
+
+        // 删除报告
+        async function deleteReport(filename) {
+            if (!confirm(`确定要删除报告 "${filename}" 吗？`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/reports/${filename}`, { method: 'DELETE' });
+                const result = await response.json();
+                if (result.success) {
+                    loadReports();
+                } else {
+                    alert('删除失败');
+                }
+            } catch (error) {
+                console.error('删除报告失败:', error);
+                alert('删除失败: ' + error.message);
+            }
+        }
     </script>
 </body>
 </html>
